@@ -1,0 +1,109 @@
+---
+title: "NYPD Shootings Data"
+author: "Joseph Bae"
+date: "2023-10-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+First import the tidyverse package which we'll be using extensively throughout this analysis.
+
+```{r}
+library(tidyverse)
+```
+
+Read in our data which is the historical NYPD Shootings Data available on the city of New York's website.
+
+```{r}
+ny_data = read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+Adjust column date types to make them easier to analyze, and also remove geolocation columns which I'm not interested in for this particular analysis. Finally, add a Year and Month column based on OCCUR_DATE.
+
+```{r}
+ny_data = ny_data %>% mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+ny_data = ny_data %>% mutate(BORO = as_factor(BORO))
+ny_data = ny_data %>% mutate(LOC_OF_OCCUR_DESC = as_factor(LOC_OF_OCCUR_DESC))
+ny_data = ny_data %>% mutate(PRECINCT = as_factor(PRECINCT))
+ny_data = ny_data %>% mutate(JURISDICTION_CODE = as_factor(JURISDICTION_CODE))
+ny_data = ny_data %>% mutate(LOC_CLASSFCTN_DESC = as_factor(LOC_CLASSFCTN_DESC))
+ny_data = ny_data %>% mutate(LOCATION_DESC = as_factor(LOCATION_DESC))
+ny_data = ny_data %>% mutate(STATISTICAL_MURDER_FLAG = as_factor(STATISTICAL_MURDER_FLAG))
+ny_data = ny_data %>% mutate(PERP_AGE_GROUP = as_factor(PERP_AGE_GROUP))
+ny_data = ny_data %>% mutate(PERP_SEX = as_factor(PERP_SEX))
+ny_data = ny_data %>% mutate(PERP_RACE = as_factor(PERP_RACE))
+ny_data = ny_data %>% mutate(VIC_AGE_GROUP = as_factor(VIC_AGE_GROUP))
+ny_data = ny_data %>% mutate(VIC_SEX = as_factor(VIC_SEX))
+ny_data = ny_data %>% mutate(VIC_RACE = as_factor(VIC_RACE))
+
+ny_data = ny_data %>% select(-c(X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat))
+
+ny_data = ny_data %>% mutate(YEAR = as.integer(format(OCCUR_DATE, "%Y")))
+ny_data = ny_data %>% mutate(MONTH = as.integer(format(OCCUR_DATE, "%m")))
+
+summary(ny_data)
+```
+
+Let's see the trend of shooting incidents by Year, and also by Month.
+
+```{r}
+by_year = ny_data %>% group_by(YEAR) %>% summarize(Incidents = n())
+by_month = ny_data %>% group_by(YEAR, MONTH) %>% summarize(Incidents = n())
+
+by_year
+
+ggplot(by_year) + geom_point(mapping = aes(x = YEAR, y = Incidents)) + geom_line(mapping = aes(x = YEAR, y = Incidents)) + labs(title = "NY Shooting Incidents by Year")
+
+ggplot(by_month) + geom_col(mapping = aes(x = MONTH, y = Incidents, fill = Incidents)) + labs(title = "NY Shooting Incidents by Year and Month") + scale_x_continuous(breaks = c(2,4,6,8,10,12), labels = c(2,4,6,8,10,12)) + facet_wrap(~YEAR)
+
+by_month %>% filter(Incidents == max(Incidents)) %>% select(YEAR, MONTH)
+```
+
+Distribution of incidents by borough
+
+```{r}
+ggplot(ny_data) + geom_bar(mapping = aes(x = BORO)) + labs(title = "NY Shooting Incidents by Borough")
+```
+
+Distribution of victim age, race, sex
+
+```{r}
+ggplot(ny_data) + geom_bar(mapping = aes(x = VIC_AGE_GROUP)) + labs(title = "NY Shooting Incidents by Victim Age Group")
+
+ggplot(ny_data) + geom_bar(mapping = aes(x = VIC_RACE)) + coord_flip() + labs(title = "NY Shooting Incidents by Victim Race")
+
+ggplot(ny_data %>% filter(!VIC_RACE == 'UNKNOWN')) + geom_bar(mapping = aes(x = BORO)) + coord_flip() + facet_wrap(~ VIC_RACE)
+
+by_sex <- ny_data %>% group_by(VIC_SEX) %>% summarize(Incidents = n())
+ggplot(by_sex, aes(x = "", y = Incidents, fill = VIC_SEX)) + geom_col() + coord_polar(theta = "y") + labs(title="Count of New York Shooting Incidents by Victim's Sex")
+```
+
+Distribution of perpetrator age, race, sex
+
+```{r}
+# 14,177 rows removed by filter
+ggplot(ny_data %>% filter(PERP_AGE_GROUP %in% c("25-44", "18-24", "45-64", "<18", "65+"))) + geom_bar(mapping = aes(x = PERP_AGE_GROUP)) + labs(title = "NY Shooting Incidents by Perpetrator Age Group")
+
+# 11,786 rows removed by filter
+ggplot(ny_data %>% filter(!is.na(PERP_RACE)) %>% filter(!PERP_RACE %in% c("(null)", "UNKNOWN"))) + geom_bar(mapping = aes(x = PERP_RACE)) + coord_flip() + labs(title = "NY Shooting Incidents by Perpetrator Race")
+
+# 11,449 rows removed by filter
+by_sex <- ny_data %>% filter(PERP_SEX %in% c("M", "F")) %>% group_by(PERP_SEX) %>% summarize(Incidents = n())
+ggplot(by_sex, aes(x = "", y = Incidents, fill = PERP_SEX)) + geom_col() + coord_polar(theta = "y") + labs(title="Count of New York Shooting Incidents by Perpetrator's Sex")
+```
+
+Modeling shooting incidents based on Month:
+
+```{r}
+by_month$MONTH2 = by_month$MONTH^2
+qm = lm(data = by_month, Incidents ~ MONTH + MONTH2)
+summary(qm)
+
+x = 1:12
+y = predict(qm, list(MONTH = x, MONTH2 = x^2))
+df = data.frame(x, y)
+ggplot(by_month) + geom_point(mapping = aes(x = MONTH, y = Incidents)) + geom_line(data = df, mapping = aes(x = x, y = y)) + scale_x_continuous(breaks = 1:12, labels = 1:12)
+```
